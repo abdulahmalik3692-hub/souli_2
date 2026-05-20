@@ -17,7 +17,7 @@ No Quotes in Primary Response:
 FALLBACK_PROMPT = (
     'The user sent a message but their emotion is unclear. '
     'Respond warmly, openly, and spiritually as a caring friend, gently inviting them to '
-    'share more if they wish. Do not assume their emotional state.'
+    'share more if they wish. Do not assume their emotional state. Keep your reply extremely brief (2-3 sentences max).'
 )
 
 def build_prompt(user_message: str, emotion: str,
@@ -37,7 +37,8 @@ def build_prompt(user_message: str, emotion: str,
             f'The user is feeling: {emotion} '
             f'(confidence: {confidence:.0%}).\n\n'
             f'[USER_MESSAGE_START]\n{user_message}\n[USER_MESSAGE_END]\n\n'
-            f'Respond warmly as Soulify, focusing on spiritual guidance and friendship.'
+            f'Respond warmly as Soulify, focusing on spiritual guidance and friendship. '
+            f'Be extremely brief (2-3 sentences max).'
         )
 
     messages.append({'role': 'user', 'content': user_prompt})
