@@ -70,8 +70,8 @@ wrong = []
 
 for text, primary, acceptable in test_data:
     result    = classifier(text[:512])[0]
-    predicted = result['label']
-    confidence= result['score']
+    predicted = result[0]['label']
+    confidence= result[0]['score']
 
     strict_ok  = predicted == primary
     lenient_ok = predicted in acceptable

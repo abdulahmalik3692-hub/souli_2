@@ -23,7 +23,7 @@ def _sync_llm_response(messages: list) -> str:
         model='llama-3.3-70b-versatile',
         messages=messages,
         temperature=0.75,
-        max_tokens=80,
+        max_tokens=90,
     )
     return response.choices[0].message.content
 

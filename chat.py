@@ -34,20 +34,19 @@ async def chat(msg: str, spd: float = 5.0):
         seen = await get_seen_quotes(user_id, em)
         qd = await generate_quote(em, msg, seen)
         await save_quote(user_id, em, qd)
+        # Combine the quote with the main response text
+        rp += f'\n\n"{qd["quote"]}" — {qd["author"]} (Try this: {qd["exercise"]})'
 
     # 4. Persist mood log
     await save_mood_log(user_id, em, cf, msg)
 
     # 5. Update history
-    history.append({'role': 'user', 'content': msg})
+    history.append({'role': 'user', 'content': msg, 'emotion': em})
     history.append({'role': 'assistant', 'content': rp, 'had_quote': qd is not None})
 
     # 6. Print output
     th = EMOTION_THEMES.get(em, EMOTION_THEMES['neutral'])
     print(f'\n[{em.upper()} | {round(cf, 2)} | {th["accent"]}]\nSoulify: {rp}')
-    if qd:
-        print(f'Quote: "{qd["quote"]}" — {qd["author"]}')
-        print(f'Exercise: {qd["exercise"]}')
     print()
 
 

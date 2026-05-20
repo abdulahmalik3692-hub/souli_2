@@ -92,9 +92,11 @@ async def chat(req: ChatRequest):
         seen = await get_seen_quotes(req.user_id, emotion)
         quote_data = await generate_quote(emotion, req.message, seen)
         await save_quote(req.user_id, emotion, quote_data)
+        # Combine the quote with the main response so it is returned as a single unified text string
+        llm_reply += f'\n\n"{quote_data["quote"]}" — {quote_data["author"]} (Try this: {quote_data["exercise"]})'
 
     # ── Step 4: Update history (cap at last 10 turns) ─────────────────────
-    history.append({'role': 'user', 'content': req.message})
+    history.append({'role': 'user', 'content': req.message, 'emotion': emotion})
     history.append({
         'role': 'assistant',
         'content': llm_reply,
