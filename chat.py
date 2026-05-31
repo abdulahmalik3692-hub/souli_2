@@ -11,7 +11,6 @@ from model.emotion_colors import EMOTION_THEMES
 from api.prompt_engine import build_prompt
 from api.groq_client import get_llm_response, generate_quote
 from api.quote_manager import should_send_quote, get_seen_quotes, save_quote
-from database.db import save_mood_log
 
 history: list = []
 session_id = str(uuid.uuid4())
@@ -37,14 +36,11 @@ async def chat(msg: str, spd: float = 5.0):
         # Combine the quote with the main response text
         rp += f'\n\n"{qd["quote"]}" — {qd["author"]} (Try this: {qd["exercise"]})'
 
-    # 4. Persist mood log
-    await save_mood_log(user_id, em, cf, msg)
-
-    # 5. Update history
+    # 4. Update history
     history.append({'role': 'user', 'content': msg, 'emotion': em})
     history.append({'role': 'assistant', 'content': rp, 'had_quote': qd is not None})
 
-    # 6. Print output
+    # 5. Print output
     th = EMOTION_THEMES.get(em, EMOTION_THEMES['neutral'])
     print(f'\n[{em.upper()} | {round(cf, 2)} | {th["accent"]}]\nSoulify: {rp}')
     print()

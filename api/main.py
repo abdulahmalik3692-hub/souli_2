@@ -19,7 +19,6 @@ from model.emotion_colors import EMOTION_THEMES
 from api.prompt_engine import build_prompt
 from api.groq_client import get_llm_response, generate_quote
 from api.quote_manager import should_send_quote, get_seen_quotes, save_quote
-from database.db import save_mood_log
 
 app = FastAPI(title='Soulify API', version='1.0.0')
 
@@ -57,7 +56,7 @@ def root():
 @app.post('/chat', response_model=ChatResponse)
 async def chat(req: ChatRequest):
     now = datetime.datetime.utcnow().timestamp()
-    
+
     # ── Memory Management: Periodic Cleanup ────────────────────────────
     import random
     if random.random() < 0.05:  # Run cleanup on ~5% of requests to save CPU
@@ -86,7 +85,7 @@ async def chat(req: ChatRequest):
     messages = build_prompt(req.message, emotion, confidence, history)
     llm_reply = await get_llm_response(messages)
 
-    # ── Step 3: Quote trigger (optional, async DB + LLM) ──────────────────
+    # ── Step 3: Quote trigger (optional, async + LLM) ──────────────────
     quote_data = None
     if should_send_quote(emotion, confidence, history):
         seen = await get_seen_quotes(req.user_id, emotion)
@@ -102,20 +101,13 @@ async def chat(req: ChatRequest):
         'content': llm_reply,
         'had_quote': quote_data is not None,
     })
-    
+
     conversation_history[req.session_id] = {
         'history': history[-10:],
         'last_seen': now
     }
 
-    # ── Step 5: Persist mood log (fire-and-forget with error handling) ────
-    try:
-        await save_mood_log(req.user_id, emotion, confidence, req.message)
-    except Exception:
-        # Log to your monitoring service here; don't fail the chat response
-        pass
-
-    # ── Step 6: Return response ────────────────────────────────────────────
+    # ── Step 5: Return response ────────────────────────────────────────────
     theme = EMOTION_THEMES.get(emotion, EMOTION_THEMES['neutral'])
 
     return ChatResponse(

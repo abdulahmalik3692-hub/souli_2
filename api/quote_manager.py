@@ -1,5 +1,4 @@
 import datetime
-from database.db import user_quotes
 
 NEGATIVE_EMOTIONS = {
     'sadness', 'grief', 'remorse', 'fear', 'nervousness',
@@ -7,11 +6,14 @@ NEGATIVE_EMOTIONS = {
     'disapproval', 'embarrassment',
 }
 
+# In-memory store: { (user_id, emotion): [quote_text, ...] }
+_seen_quotes_cache: dict[tuple, list] = {}
+
 
 def should_send_quote(emotion: str, confidence: float,
                       history: list) -> bool:
     """Return True only when a quote is warranted for this turn.
-    
+
     A quote is triggered if:
     1. The current emotion is negative.
     2. The confidence is above 0.60.
@@ -26,11 +28,11 @@ def should_send_quote(emotion: str, confidence: float,
 
     # Get all user messages from history
     user_messages = [m for m in history if m.get('role') == 'user']
-    
+
     # We need the last 2 user messages in history to exist and have the same emotion
     if len(user_messages) < 2:
         return False
-        
+
     # Check if the last 2 user messages have the same emotion as the current one
     for msg in user_messages[-2:]:
         if msg.get('emotion') != emotion:
@@ -45,31 +47,15 @@ def should_send_quote(emotion: str, confidence: float,
 
 
 async def get_seen_quotes(user_id: str, emotion: str) -> list:
-    """Return the text of the last 20 quotes sent for this emotion."""
-    try:
-        cursor = user_quotes.find(
-            {'user_id': user_id, 'emotion': emotion},
-            {'quote_text': 1}
-        ).sort('sent_at', -1).limit(20)
-        docs = await cursor.to_list(20)
-        return [d['quote_text'] for d in docs]
-    except Exception:
-        # MongoDB unreachable — return empty so the quote still generates
-        return []
+    """Return the text of the last 20 quotes sent for this emotion (in-memory)."""
+    return _seen_quotes_cache.get((user_id, emotion), [])[-20:]
 
 
 async def save_quote(user_id: str, emotion: str, data: dict):
-    """Persist a quote record so we can avoid repetition later."""
-    try:
-        await user_quotes.insert_one({
-            'user_id':    user_id,
-            'emotion':    emotion,
-            'quote_text': data['quote'],
-            'author':     data['author'],
-            'exercise':   data['exercise'],
-            'sent_at':    datetime.datetime.utcnow()
-        })
-    except Exception:
-        # MongoDB unreachable — silently skip persistence
-        pass
-
+    """Persist a quote record in-memory so we can avoid repetition later."""
+    key = (user_id, emotion)
+    if key not in _seen_quotes_cache:
+        _seen_quotes_cache[key] = []
+    _seen_quotes_cache[key].append(data['quote'])
+    # Keep only the last 50 per user+emotion to avoid unbounded growth
+    _seen_quotes_cache[key] = _seen_quotes_cache[key][-50:]
