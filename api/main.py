@@ -1,25 +1,93 @@
+# main.py
 import os
 import asyncio
 import datetime
+import random
+import uuid
+import hashlib
 
-from fastapi import FastAPI # type: ignore
-from fastapi.middleware.cors import CORSMiddleware # type: ignore
-from pydantic import BaseModel # type: ignore
-from dotenv import load_dotenv # type: ignore
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from dotenv import load_dotenv
 
 load_dotenv()
 
 import sys
-# Ensure the project root is in sys.path for internal imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model.emotion_classifier import detect_emotion
 from model.behavior import apply_typing_modifier
 from model.emotion_colors import EMOTION_THEMES
 from api.prompt_engine import build_prompt
-from api.groq_client import get_llm_response, generate_quote
-from api.quote_manager import should_send_quote, get_seen_quotes, save_quote
+from api.groq_client import get_llm_response
 
+# ── Crisis Detection ───────────────────────────────────────────────────────
+CRISIS_SIGNALS = [
+    "want to die", "end my life", "kill myself",
+    "nobody would miss me", "disappear forever",
+    "no reason to live", "cannot go on", "give up on life",
+    "don't want to be here", "wish i was dead", "better off dead",
+    "want to hurt myself", "want to end it", "tired of living",
+    "no point in living", "nothing to live for",
+    "nothing matters now", "leave the world behind",
+    "leave this world", "end everything", "no way out",
+    "everyone would be better without me"
+]
+
+def is_crisis_message(message: str) -> bool:
+    return any(signal in message.lower() for signal in CRISIS_SIGNALS)
+
+CRISIS_PROMPT_ADDITION = (
+    "\nThis person may be in a dark place right now. "
+    "Do not give spiritual wisdom. Do not give advice. Do not jump to solutions.\n"
+    "1. Name what you are hearing — plainly and warmly.\n"
+    "2. Tell them you are not going anywhere.\n"
+    "3. Gently mention they can call Umang Pakistan: 0317-4288665\n"
+    "4. Ask one simple question about right now.\n"
+    "Warm. Direct. No drama. No lecture.\n"
+)
+
+# ── Time of Day Context ────────────────────────────────────────────────────
+def get_time_context() -> str:
+    hour = datetime.datetime.now().hour
+    if 5 <= hour < 12:
+        return "The person is starting their day. Be energetic and hopeful."
+    elif 12 <= hour < 17:
+        return "The person is in the middle of their day. Ground them."
+    elif 17 <= hour < 21:
+        return "The person is winding down. Help them reflect peacefully."
+    else:
+        return "Be extra gentle and warm. Bring calm and safety."
+
+# ── Emotion Shift Detection ────────────────────────────────────────────────
+def detect_emotional_shift(history: list) -> str:
+    emotions = [
+        m.get('emotion') for m in history
+        if m.get('role') == 'user' and m.get('emotion')
+    ]
+    if len(emotions) < 2:
+        return ""
+    negative = {'sadness', 'anger', 'fear', 'grief', 'disappointment',
+                 'remorse', 'nervousness', 'annoyance', 'disgust',
+                 'confusion', 'embarrassment', 'disapproval'}
+    positive = {'joy', 'excitement', 'gratitude', 'optimism', 'relief',
+                 'pride', 'love', 'admiration', 'amusement', 'approval', 'caring'}
+    first = emotions[0]
+    last = emotions[-1]
+    if first in negative and last in positive:
+        return "The person has shifted to a more positive feeling. Acknowledge this gently."
+    elif first in positive and last in negative:
+        return "The person's mood has dropped. Be gentler than usual."
+    elif first in negative and last in negative:
+        return "The person has been struggling throughout. Be extra warm and present."
+    return ""
+
+# ── User Storage ───────────────────────────────────────────────────────────
+users_db: dict = {}
+sessions_db: dict = {}
+
+# ── App Setup ──────────────────────────────────────────────────────────────
 app = FastAPI(title='Soulify API', version='1.0.0')
 
 app.add_middleware(
@@ -29,16 +97,31 @@ app.add_middleware(
     allow_headers=['*'],
 )
 
-# In-memory conversation history: { session_id: {'history': list, 'last_seen': float} }
 conversation_history: dict[str, dict] = {}
 
+# ── Models ─────────────────────────────────────────────────────────────────
+class SignupRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class AuthResponse(BaseModel):
+    success: bool
+    message: str
+    user_id: str = ""
+    session_id: str = ""
+    name: str = ""
 
 class ChatRequest(BaseModel):
     message: str
     session_id: str
     user_id: str
     typing_speed: float = 5.0
-
+    user_name: str = ""
 
 class ChatResponse(BaseModel):
     reply: str
@@ -47,86 +130,121 @@ class ChatResponse(BaseModel):
     theme: dict
     quote: dict | None = None
 
+# ── Auth Endpoints ─────────────────────────────────────────────────────────
+@app.post('/signup', response_model=AuthResponse)
+async def signup(req: SignupRequest):
+    if req.email in users_db:
+        return AuthResponse(success=False, message="Email already registered.")
+    user_id = str(uuid.uuid4())
+    password_hash = hashlib.sha256(req.password.encode()).hexdigest()
+    users_db[req.email] = {
+        "name": req.name,
+        "email": req.email,
+        "password_hash": password_hash,
+        "user_id": user_id,
+    }
+    session_id = str(uuid.uuid4())
+    sessions_db[session_id] = user_id
+    return AuthResponse(
+        success=True,
+        message="Account created successfully.",
+        user_id=user_id,
+        session_id=session_id,
+        name=req.name,
+    )
 
+@app.post('/login', response_model=AuthResponse)
+async def login(req: LoginRequest):
+    user = users_db.get(req.email)
+    password_hash = hashlib.sha256(req.password.encode()).hexdigest()
+    if not user or user["password_hash"] != password_hash:
+        return AuthResponse(success=False, message="Invalid email or password.")
+    session_id = str(uuid.uuid4())
+    sessions_db[session_id] = user["user_id"]
+    return AuthResponse(
+        success=True,
+        message="Logged in successfully.",
+        user_id=user["user_id"],
+        session_id=session_id,
+        name=user["name"],
+    )
+
+@app.post('/logout')
+async def logout(session_id: str):
+    sessions_db.pop(session_id, None)
+    return {"success": True, "message": "Logged out."}
+
+# ── General Endpoints ──────────────────────────────────────────────────────
 @app.get('/')
 def root():
     return {'status': 'Soulify API is running'}
-
 
 @app.post('/chat', response_model=ChatResponse)
 async def chat(req: ChatRequest):
     now = datetime.datetime.utcnow().timestamp()
 
-    # ── Memory Management: Periodic Cleanup ────────────────────────────
-    import random
-    if random.random() < 0.05:  # Run cleanup on ~5% of requests to save CPU
+    if random.random() < 0.05:
         from model.constants import SESSION_TTL_MINUTES
         ttl_sec = SESSION_TTL_MINUTES * 60
         for sid in list(conversation_history.keys()):
             item = conversation_history[sid]
-            if not isinstance(item, dict) or 'last_seen' not in item or (now - item['last_seen'] > ttl_sec):
+            if not isinstance(item, dict) or 'last_seen' not in item \
+                    or (now - item['last_seen'] > ttl_sec):
                 del conversation_history[sid]
 
-    # Get history and last_seen
-    session_data = conversation_history.get(req.session_id, {'history': [], 'last_seen': now})
+    session_data = conversation_history.get(
+        req.session_id, {'history': [], 'last_seen': now}
+    )
     history = session_data.get('history', [])
 
-    # ── Step 1: Run emotion detection ─────────────────────────────────────
-    emotion_result = await asyncio.to_thread(
-        detect_emotion, req.message, req.session_id
-    )
+    if is_crisis_message(req.message):
+        crisis_messages = build_prompt(
+            req.message, 'sadness', 1.0, history,
+            extra_instruction=CRISIS_PROMPT_ADDITION,
+            user_name=req.user_name
+        )
+        llm_reply = await get_llm_response(crisis_messages)
+        theme = EMOTION_THEMES.get('sadness', EMOTION_THEMES['neutral'])
+        history.append({'role': 'user', 'content': req.message, 'emotion': 'crisis'})
+        history.append({'role': 'assistant', 'content': llm_reply, 'had_quote': False})
+        conversation_history[req.session_id] = {'history': history[-10:], 'last_seen': now}
+        return ChatResponse(reply=llm_reply, emotion='crisis', confidence=1.0, theme=theme, quote=None)
 
+    emotion_result = await asyncio.to_thread(detect_emotion, req.message, req.session_id)
     emotion = emotion_result['emotion']
-    confidence = apply_typing_modifier(
-        emotion, emotion_result['confidence'], req.typing_speed
-    )
+    confidence = apply_typing_modifier(emotion, emotion_result['confidence'], req.typing_speed)
 
-    # ── Step 2: Build emotion-aware prompt then fire LLM ───────────────────
-    messages = build_prompt(req.message, emotion, confidence, history)
+    time_context = get_time_context()
+    shift_context = detect_emotional_shift(history)
+
+    extra = f"\nTime of day context: {time_context}\n"
+    if shift_context:
+        extra += f"\nEmotional journey note: {shift_context}\n"
+
+    messages = build_prompt(
+        req.message, emotion, confidence, history,
+        extra_instruction=extra,
+        user_name=req.user_name
+    )
     llm_reply = await get_llm_response(messages)
 
-    # ── Step 3: Quote trigger (optional, async + LLM) ──────────────────
-    quote_data = None
-    if should_send_quote(emotion, confidence, history):
-        seen = await get_seen_quotes(req.user_id, emotion)
-        quote_data = await generate_quote(emotion, req.message, seen)
-        await save_quote(req.user_id, emotion, quote_data)
-        # Combine the quote with the main response so it is returned as a single unified text string
-        llm_reply += f'\n\n"{quote_data["quote"]}" — {quote_data["author"]} (Try this: {quote_data["exercise"]})'
-
-    # ── Step 4: Update history (cap at last 10 turns) ─────────────────────
     history.append({'role': 'user', 'content': req.message, 'emotion': emotion})
-    history.append({
-        'role': 'assistant',
-        'content': llm_reply,
-        'had_quote': quote_data is not None,
-    })
+    history.append({'role': 'assistant', 'content': llm_reply, 'had_quote': False})
+    conversation_history[req.session_id] = {'history': history[-10:], 'last_seen': now}
 
-    conversation_history[req.session_id] = {
-        'history': history[-10:],
-        'last_seen': now
-    }
-
-    # ── Step 5: Return response ────────────────────────────────────────────
     theme = EMOTION_THEMES.get(emotion, EMOTION_THEMES['neutral'])
-
     return ChatResponse(
         reply=llm_reply,
         emotion=emotion,
         confidence=round(confidence, 3),
         theme=theme,
-        quote=quote_data,
+        quote=None,
     )
-
 
 @app.get('/health')
 async def health():
-    return {
-        'status': 'healthy',
-        'timestamp': datetime.datetime.utcnow().isoformat(),
-    }
-
+    return {'status': 'healthy', 'timestamp': datetime.datetime.utcnow().isoformat()}
 
 if __name__ == "__main__":
-    import uvicorn # type: ignore
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
