@@ -21,17 +21,12 @@ The project is built as a hybrid intelligence system that combines traditional N
 
 ### 4. Backend Orchestration (`api/`)
 *   **FastAPI Framework:** A high-performance, asynchronous API that manages the flow from message input to therapeutic output.
-*   **Groq LLM Integration:** Uses the Llama-3-70B model (via Groq) for ultra-low latency response generation.
-*   **Quote Manager:** An intelligent service that triggers context-aware therapeutic quotes and exercises based on emotional intensity and frequency.
-
-### 5. Persistent Memory (`database/`)
-*   **MongoDB (Motor):** Asynchronously logs emotional trends and quote history. This allows the system to provide "Long-Term Memory" and avoid repeating the same advice or quotes.
+*   **Groq LLM Integration:** Uses the Llama-3.3-70B model (via Groq) for ultra-low latency response generation.
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 * Python 3.10+
-* MongoDB Atlas Account
 * Groq API Key
 
 ### Installation
@@ -46,8 +41,6 @@ The project is built as a hybrid intelligence system that combines traditional N
 3. Set up your `.env` file:
    ```env
    GROQ_API_KEY=your_key_here
-   MONGODB_URI=your_mongodb_uri
-   DB_NAME=soulify_db
    ```
 
 ### Running the API

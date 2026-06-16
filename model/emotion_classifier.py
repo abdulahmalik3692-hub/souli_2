@@ -1,8 +1,8 @@
 import warnings
 import re
-from transformers import pipeline # type: ignore
-from collections import deque
 import time
+from collections import deque
+from transformers import pipeline # type: ignore
 
 # Silence a FutureWarning emitted internally by huggingface_hub
 warnings.filterwarnings(
@@ -32,8 +32,21 @@ from model.constants import (
 #  SESSION STATE
 # ===========================================================================
 
-session_windows  = {}   # { session_id: {'data': deque, 'last_seen': float} }
-emotion_history  = {}   # { session_id: {'data': deque, 'last_seen': float} }
+session_windows: dict[str, dict] = {}   # { session_id: {'data': deque, 'last_seen': float} }
+emotion_history: dict[str, dict] = {}   # { session_id: {'data': deque, 'last_seen': float} }
+
+def _cleanup_stale_sessions():
+    """Remove sessions older than 2 hours to prevent memory leaks."""
+    now = time.time()
+    stale_threshold = 2 * 60 * 60  # 2 hours in seconds
+    
+    for sid in list(session_windows.keys()):
+        if now - session_windows[sid]['last_seen'] > stale_threshold:
+            del session_windows[sid]
+            
+    for sid in list(emotion_history.keys()):
+        if now - emotion_history[sid]['last_seen'] > stale_threshold:
+            del emotion_history[sid]
 
 # ===========================================================================
 #  SARCASM & MASKING DETECTION
@@ -107,7 +120,7 @@ EMOJI_MAP = {
     '😡': ' angry ', '🤬': ' very angry ', '😠': ' angry ',
     '💢': ' angry ', '👿': ' angry ',
     '😨': ' scared afraid ', '😰': ' anxious worried ', '😱': ' terrified ',
-    '😳': ' embarrassed ', '😳': ' embarrassed shocked ',
+    '😳': ' embarrassed shocked ',
     '😊': ' happy ', '😄': ' happy joyful ', '🥰': ' love happy ',
     '😍': ' love adore ', '❤️': ' love ', '💕': ' love ',
     '🥳': ' excited celebrating ', '🎉': ' excited joy ',
@@ -234,6 +247,11 @@ def recalibrate_confidence(raw_score: float) -> float:
 
 def detect_emotion(new_message: str, session_id: str) -> dict:
     now = time.time()
+    
+    # Run cleanup periodically (approx 1 in 100 requests)
+    if now % 100 < 1:
+        _cleanup_stale_sessions()
+        
     if session_id not in session_windows:
         session_windows[session_id] = {'data': deque(maxlen=3), 'last_seen': now}
     session_windows[session_id]['data'].append(new_message)

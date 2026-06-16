@@ -13,40 +13,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+from model.constants import SESSION_TTL_MINUTES
 from model.emotion_classifier import detect_emotion
 from model.behavior import apply_typing_modifier
 from model.emotion_colors import EMOTION_THEMES
 from api.prompt_engine import build_prompt
 from api.groq_client import get_llm_response
-
-# ── Crisis Detection ───────────────────────────────────────────────────────
-CRISIS_SIGNALS = [
-    "want to die", "end my life", "kill myself",
-    "nobody would miss me", "disappear forever",
-    "no reason to live", "cannot go on", "give up on life",
-    "don't want to be here", "wish i was dead", "better off dead",
-    "want to hurt myself", "want to end it", "tired of living",
-    "no point in living", "nothing to live for",
-    "nothing matters now", "leave the world behind",
-    "leave this world", "end everything", "no way out",
-    "everyone would be better without me"
-]
-
-def is_crisis_message(message: str) -> bool:
-    return any(signal in message.lower() for signal in CRISIS_SIGNALS)
-
-CRISIS_PROMPT_ADDITION = (
-    "\nThis person may be in a dark place right now. "
-    "Do not give spiritual wisdom. Do not give advice. Do not jump to solutions.\n"
-    "1. Name what you are hearing — plainly and warmly.\n"
-    "2. Tell them you are not going anywhere.\n"
-    "3. Gently mention they can call Umang Pakistan: 0317-4288665\n"
-    "4. Ask one simple question about right now.\n"
-    "Warm. Direct. No drama. No lecture.\n"
-)
 
 # ── Time of Day Context ────────────────────────────────────────────────────
 def get_time_context() -> str:
@@ -183,32 +155,10 @@ def root():
 async def chat(req: ChatRequest):
     now = datetime.datetime.utcnow().timestamp()
 
-    if random.random() < 0.05:
-        from model.constants import SESSION_TTL_MINUTES
-        ttl_sec = SESSION_TTL_MINUTES * 60
-        for sid in list(conversation_history.keys()):
-            item = conversation_history[sid]
-            if not isinstance(item, dict) or 'last_seen' not in item \
-                    or (now - item['last_seen'] > ttl_sec):
-                del conversation_history[sid]
-
     session_data = conversation_history.get(
         req.session_id, {'history': [], 'last_seen': now}
     )
     history = session_data.get('history', [])
-
-    if is_crisis_message(req.message):
-        crisis_messages = build_prompt(
-            req.message, 'sadness', 1.0, history,
-            extra_instruction=CRISIS_PROMPT_ADDITION,
-            user_name=req.user_name
-        )
-        llm_reply = await get_llm_response(crisis_messages)
-        theme = EMOTION_THEMES.get('sadness', EMOTION_THEMES['neutral'])
-        history.append({'role': 'user', 'content': req.message, 'emotion': 'crisis'})
-        history.append({'role': 'assistant', 'content': llm_reply, 'had_quote': False})
-        conversation_history[req.session_id] = {'history': history[-10:], 'last_seen': now}
-        return ChatResponse(reply=llm_reply, emotion='crisis', confidence=1.0, theme=theme, quote=None)
 
     emotion_result = await asyncio.to_thread(detect_emotion, req.message, req.session_id)
     emotion = emotion_result['emotion']

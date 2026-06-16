@@ -30,7 +30,7 @@ QUOTE_CONFIDENCE_THRESHOLD = 0.85
 QUOTE_COOLDOWN_TURNS = 3
 
 # ===========================================================================
-#  TYPING SPEED MODIFIER CONSTANTS (NEW)
+#  TYPING SPEED MODIFIER CONSTANTS
 # ===========================================================================
 
 # Emotions that get boosted when user types FAST (>7 cps)

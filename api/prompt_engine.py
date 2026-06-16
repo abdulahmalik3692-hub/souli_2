@@ -1,3 +1,16 @@
+"""Prompt builder for Soulify.
+
+Constructs the message array sent to the LLM, including:
+- System prompt with Souli's personality
+- Spiritual direction based on detected emotion
+- Story pool (injected conditionally)
+- Conversation history (last 4 turns)
+- User message with contextual instructions
+"""
+
+# ── Spiritual Direction Map ───────────────────────────────────────────────
+# Maps each emotion to a one-line directive for how Souli should respond.
+
 SPIRITUAL_DIRECTION = {
     "sadness": "Feel it with them first. Do not jump to shukr or silver linings. Just make them feel heard. Then gently remind them this test will pass.",
     "disappointment": "Honor the hope they had first. Sit with them in it. Do not immediately push shukr or positivity. Let them feel heard before anything else.",
@@ -28,6 +41,8 @@ SPIRITUAL_DIRECTION = {
     "curiosity": "Celebrate their seeking mind. A soul that keeps asking never stops growing.",
 }
 
+
+# ── Stories Pool ──────────────────────────────────────────────────────────
 
 STORIES_POOL = """
 Real stories. Use ONLY when they genuinely mirror what this person is going through.
@@ -76,8 +91,12 @@ Hopelessness is not allowed in our faith. Allah says after hardship comes ease. 
 """
 
 
-FALLBACK_PROMPT = """Not sure what they are feeling. Respond like a warm caring friend. One simple real sentence."""
+# ── Fallback Prompt ───────────────────────────────────────────────────────
 
+FALLBACK_PROMPT = "Not sure what they are feeling. Respond like a warm caring friend. One simple real sentence."
+
+
+# ── System Prompt ─────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are Souli. You are someone's spiritual buddy and closest friend.
 
@@ -137,57 +156,82 @@ Short message = 1 to 2 sentences back.
 Long message = max 3 sentences.
 """
 
+# Keywords that trigger deeper spiritual context
+_DEEP_KEYWORDS = frozenset([
+    'allah', 'god', 'rab', 'rabb', 'khuda', 'alone', 'hopeless',
+    'giving up', 'end', 'nobody', 'no one', 'forgotten',
+    'depressed', 'worthless', 'door', 'betrayed', 'lost',
+    'angry', 'scared', 'afraid', 'trapped', 'fail', 'nothing',
+    'toxic', 'fake', 'tired', 'frustrated', 'hate', 'resign',
+    'pain', 'hurt', 'sukoon', 'peace', 'positive', 'understand',
+    'explain', 'politics', 'everyone',
+])
 
-def build_prompt(user_message: str, emotion: str,
-                 confidence: float, history: list,
-                 extra_instruction: str = "",
-                 user_name: str = "") -> list:
+_ALLAH_KEYWORDS = frozenset(['allah', 'god', 'rab', 'rabb', 'khuda', 'almighty'])
 
+_POSITIVE_EMOTIONS = frozenset([
+    'joy', 'excitement', 'pride', 'optimism', 'gratitude',
+    'relief', 'approval', 'amusement', 'love', 'admiration',
+])
+
+
+# ── Main Builder ──────────────────────────────────────────────────────────
+
+
+def build_prompt(
+    user_message: str,
+    emotion: str,
+    confidence: float,
+    history: list,
+    extra_instruction: str = "",
+    user_name: str = "",
+) -> list:
+    """Build the complete message array for the LLM.
+
+    Args:
+        user_message: The user's current message text.
+        emotion: Detected emotion label.
+        confidence: Confidence score (0-1).
+        history: Conversation history list of {role, content} dicts.
+        extra_instruction: Additional context (time of day, emotional shift).
+        user_name: Optional user name (will not be used in replies).
+
+    Returns:
+        List of message dicts ready to send to the LLM.
+    """
     messages = [{'role': 'system', 'content': SYSTEM_PROMPT}]
 
-    turn_count = len([m for m in history if m.get('role') == 'user'])
+    turn_count = sum(1 for m in history if m.get('role') == 'user')
+    msg_lower = user_message.lower()
 
-    allah_or_deep = any(
-    w in user_message.lower()
-    for w in ['allah', 'god', 'rab', 'rabb', 'khuda', 'alone', 'hopeless',
-              'giving up', 'end', 'nobody', 'no one', 'forgotten',
-              'depressed', 'worthless', 'door', 'betrayed', 'lost',
-              'angry', 'scared', 'afraid', 'trapped', 'fail', 'nothing',
-              'toxic', 'fake', 'tired', 'frustrated', 'hate', 'resign',
-              'pain', 'hurt', 'sukoon', 'peace', 'positive', 'understand',
-              'explain', 'politics', 'everyone', 'no one']
-)
-
+    # Inject stories pool when the conversation is deep enough
+    allah_or_deep = any(w in msg_lower for w in _DEEP_KEYWORDS)
     if turn_count >= 2 or allah_or_deep:
         messages.append({
             'role': 'system',
-            'content': f'STORIES AND WISDOM:\n{STORIES_POOL}'
+            'content': f'STORIES AND WISDOM:\n{STORIES_POOL}',
         })
 
+    # Inject user name context (Souli should NOT use it in replies)
     if user_name:
         messages.append({
             'role': 'system',
-            'content': f"Person's name is {user_name}. NEVER use this name in replies."
+            'content': f"Person's name is {user_name}. NEVER use this name in replies.",
         })
 
+    # Add recent conversation history (last 4 turns = 8 messages)
     for turn in history[-4:]:
         messages.append({'role': turn['role'], 'content': turn['content']})
 
+    # Build the contextual user prompt
     direction = SPIRITUAL_DIRECTION.get(
         emotion,
-        "Be warm and present. Stay with them. Let them lead."
+        "Be warm and present. Stay with them. Let them lead.",
     )
+    allah_mentioned = any(w in msg_lower for w in _ALLAH_KEYWORDS)
+    positive_emotion = emotion in _POSITIVE_EMOTIONS
 
-    allah_mentioned = any(
-        w in user_message.lower()
-        for w in ['allah', 'god', 'rab', 'rabb', 'khuda', 'almighty']
-    )
-
-    positive_emotion = emotion in [
-        'joy', 'excitement', 'pride', 'optimism', 'gratitude',
-        'relief', 'approval', 'amusement', 'love', 'admiration'
-    ]
-
+    # Dynamic response length based on message length
     word_count = len(user_message.split())
     if word_count <= 5:
         length_rule = "Very short message. 1 sentence only."
@@ -196,6 +240,7 @@ def build_prompt(user_message: str, emotion: str,
     else:
         length_rule = "Long message. Max 3 sentences."
 
+    # Build the final user prompt
     if confidence < 0.5:
         user_prompt = f'{FALLBACK_PROMPT}\n\n[MESSAGE]: {user_message}'
     else:

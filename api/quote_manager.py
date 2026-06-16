@@ -1,24 +1,26 @@
-import datetime
+"""Quote manager for Soulify.
 
-NEGATIVE_EMOTIONS = {
-    'sadness', 'grief', 'remorse', 'fear', 'nervousness',
-    'anger', 'annoyance', 'disgust', 'disappointment', 'confusion',
-    'disapproval', 'embarrassment',
-}
+Tracks and manages therapeutic quotes sent to the user based on emotion triggers.
+"""
+
+from model.constants import NEGATIVE_EMOTIONS
 
 # In-memory store: { (user_id, emotion): [quote_text, ...] }
 _seen_quotes_cache: dict[tuple, list] = {}
 
 
-def should_send_quote(emotion: str, confidence: float,
-                      history: list) -> bool:
+def should_send_quote(
+    emotion: str,
+    confidence: float,
+    history: list,
+) -> bool:
     """Return True only when a quote is warranted for this turn.
 
     A quote is triggered if:
     1. The current emotion is negative.
     2. The confidence is above 0.60.
-    3. The user's emotion has remained the same negative emotion for the last 3 consecutive user messages
-       (the current message + the last 2 user messages in history).
+    3. The user's emotion has remained the same negative emotion for the last
+       3 consecutive user messages (current + last 2 in history).
     4. A quote hasn't been sent in the last 3 assistant turns.
     """
     if emotion not in NEGATIVE_EMOTIONS:
@@ -43,6 +45,7 @@ def should_send_quote(emotion: str, confidence: float,
     for msg in recent[-3:]:
         if msg.get('had_quote'):
             return False
+
     return True
 
 
@@ -56,6 +59,7 @@ async def save_quote(user_id: str, emotion: str, data: dict):
     key = (user_id, emotion)
     if key not in _seen_quotes_cache:
         _seen_quotes_cache[key] = []
+        
     _seen_quotes_cache[key].append(data['quote'])
     # Keep only the last 50 per user+emotion to avoid unbounded growth
     _seen_quotes_cache[key] = _seen_quotes_cache[key][-50:]
