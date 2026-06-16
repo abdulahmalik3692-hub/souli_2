@@ -19,7 +19,7 @@ warnings.filterwarnings(
 # Load once at startup — top_k=None returns ALL label scores
 classifier = pipeline(
     'text-classification',
-    model='SamLowe/roberta-base-go_emotions',
+    model='joeddav/distilbert-base-uncased-go-emotions-student',
     top_k=None
 )
 
